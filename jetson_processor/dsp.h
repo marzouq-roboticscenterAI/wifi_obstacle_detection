@@ -23,7 +23,7 @@ typedef struct {
     float    run_mean[CSI_MAX_SUBCARRIERS];
     uint8_t  valid[CSI_MAX_SUBCARRIERS];  /* 1 = usable data subcarrier       */
 
-    uint64_t last_t_ns;
+    uint64_t last_t_ns;         /* latest arrival, Jetson CLOCK_MONOTONIC ns  */
     float    motion_energy;     /* latest normalized motion metric            */
     float    doppler_hz;        /* dominant non-DC Doppler (radial speed cue) */
 } link_state_t;

@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 199309L   /* clock_gettime / CLOCK_MONOTONIC under -std=c11 */
 /* dsp.c -- see dsp.h.
  *
  * Motion metric: for each usable subcarrier we compute the temporal variance of
@@ -15,10 +16,20 @@
 #include <math.h>
 #include <string.h>
 #include <float.h>
+#include <time.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+/* Jetson-local monotonic clock. Link staleness is measured against THIS, never
+ * the Pi's timestamp -- so an unsynced/offline Pi clock can't stall tracking. */
+static uint64_t mono_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
 
 static int mac_eq(const uint8_t *a, const uint8_t *b){ return memcmp(a,b,6)==0; }
 
@@ -157,7 +168,7 @@ int dsp_ingest(dsp_t *d, const csi_wire_hdr_t *hdr, const int16_t *csi)
 
     L->head  = (L->head + 1) % MOTION_WIN;
     if (L->count < MOTION_WIN) L->count++;
-    L->last_t_ns = hdr->t_ns;
+    L->last_t_ns = mono_ns();      /* Jetson-local arrival, not the Pi's clock */
 
     if ((L->count & 31) == 0) update_valid_mask(L);
     compute_metrics(L);

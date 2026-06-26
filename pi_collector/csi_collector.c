@@ -19,8 +19,11 @@
  *   - sudo apt install libpcap-dev
  *
  * Build:  make            (in this directory)
- * Run:    sudo ./csi_collector -i wlan0 -H 192.168.55.1 -p 9999
- *         (192.168.55.1 = Jetson over the USB CDC-Ethernet gadget link)
+ * Run:    sudo ./csi_collector -i wlan0 -H 192.168.100.1 -p 9999
+ *         (192.168.100.1 = Jetson over a direct Ethernet cable; set static IPs
+ *          on both ends -- see README. Also works over USB CDC-Ethernet, WiFi,
+ *          or Bluetooth RFCOMM (-t bt). The capture iface (-i) is always the
+ *          Pi's sensing WiFi; the data link is whatever -H/-t points at.)
  */
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -61,7 +64,7 @@ static void on_sig(int s){ (void)s; g_run = 0; }
 /* link configuration (set from argv, used by the (re)connect path) */
 enum { LINK_TCP = 0, LINK_BT = 1 };
 static int   g_transport = LINK_TCP;
-static const char *g_host = "192.168.55.1";
+static const char *g_host = "192.168.100.1";   /* Jetson, direct Ethernet link */
 static int   g_port = 9999;
 static const char *g_bt_addr = NULL;   /* Jetson Bluetooth MAC for RFCOMM */
 static int   g_channel = 1;

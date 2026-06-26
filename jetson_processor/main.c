@@ -29,7 +29,18 @@ typedef struct {
     uint64_t   next_proc_ns;
 } app_t;
 
-static uint64_t now_ns(void)
+/* Monotonic clock for all internal timing (tick gating, decay, tracker dt).
+ * Independent of wall-clock / NTP, so an offline Pi or a clock step can't
+ * disturb tracking. */
+static uint64_t mono_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+/* Wall clock, used only for the human-readable timestamp in the JSON log. */
+static uint64_t wall_ns(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -72,7 +83,7 @@ static void on_csi(const csi_wire_hdr_t *hdr, const int16_t *csi, void *user)
     app_t *a = (app_t*)user;
     dsp_ingest(&a->dsp, hdr, csi);
 
-    uint64_t t = now_ns();
+    uint64_t t = mono_ns();
     if (a->next_proc_ns == 0) a->next_proc_ns = t;
     if (t < a->next_proc_ns) return;
     a->next_proc_ns = t + (uint64_t)PROC_PERIOD_MS * 1000000ull;
@@ -84,7 +95,7 @@ static void on_csi(const csi_wire_hdr_t *hdr, const int16_t *csi, void *user)
     if (have) a->last_fix = fix;
 
     tracker_step(&a->trk, t, have, fix.x, fix.y);
-    emit(a, t, &fix, have);
+    emit(a, wall_ns(), &fix, have);   /* log timestamp = wall clock */
 
     /* --- optional learned body-tracking hook -------------------------------
      * To run a trained model (e.g. DensePose-from-WiFi style) instead of/along
