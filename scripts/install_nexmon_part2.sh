@@ -15,6 +15,7 @@ set -eo pipefail
 
 [ "$(id -u)" -eq 0 ] || { echo "run me with sudo (need root)."; exit 1; }
 
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 NEXMON_DIR=${NEXMON_DIR:-/opt/nexmon}
 FWVER=${FWVER:-7_45_189}
 FORCE=${FORCE:-0}
@@ -55,6 +56,8 @@ PATCHDIR="$NEXMON_ROOT/patches/bcm43455c0/$FWVER"
 cd "$PATCHDIR"
 [ -d nexmon_csi/.git ] || git clone --depth=1 https://github.com/seemoo-lab/nexmon_csi.git
 cd nexmon_csi
+echo "[nexmon-2] backing up stock WiFi firmware (for offline restore) ..."
+"$SELF_DIR/backup_firmware.sh" || echo "[nexmon-2] WARN: firmware backup failed; offline restore may be unavailable"
 make -f Makefile.rpi install-firmware
 make -f Makefile.rpi unmanage
 make -f Makefile.rpi reload-full || echo "[nexmon-2] reload-full failed (a reboot also loads the new firmware)"

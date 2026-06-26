@@ -39,32 +39,39 @@ WiFi channel, and we triangulate which transmitter→receiver paths are perturbe
    address** and its **(x, y) position in metres**, plus the **Pi's position**.
 
 ### B. Software setup (one-time)
+
+> **Do the Nexmon install LAST.** It patches the Pi's WiFi firmware, after which
+> the onboard WiFi is **slow/flaky by design** (see the caveat in the Nexmon
+> section). So finish everything that needs normal Pi internet first, and ideally
+> run the Pi's setup with the **Pi on Ethernet / your wired network**.
+
 4. **Get the repo on both boards** (clone or copy this folder to each).
-5. **Pi — install dependencies** (do this while the Pi still has its normal
-   WiFi/internet, i.e. before capture mode):
+5. **Jetson — install dependencies:**
+   ```bash
+   make deps-jetson
+   ```
+6. **Jetson — describe your room and anchors** (writes `config.h` for you):
+   ```bash
+   make configure          # prompts for room size, Pi (RX) position, anchor MAC+xy
+   ```
+7. **Pi — install dependencies** (while the Pi still has good internet):
    ```bash
    make deps-pi
    ```
-6. **Pi — install Nexmon CSI** (the firmware that produces CSI). Two scripts,
-   because the first reboots into the 4 KB-page kernel:
+8. **Start your anchors transmitting** so the Pi receives frames and CSI is
+   produced — e.g. ping-flood the Pi (or a broadcast) from each anchor:
+   ```bash
+   sudo ping -f -i 0.001 <pi-ip>      # run on/near each anchor
+   ```
+9. **Pi — install Nexmon CSI (the LAST step).** It produces the CSI but degrades
+   the onboard WiFi, so do it once everything above is done. Two scripts, because
+   the first reboots into the 4 KB-page kernel:
    ```bash
    sudo make nexmon-part1     # system prep + kernel switch, then reboot
    sudo make nexmon-part2     # after reboot: build + flash firmware, install tools
    ```
    Details / manual steps: [Raspberry Pi OS / Nexmon CSI setup](#raspberry-pi-os--nexmon-csi-setup-the-real-prerequisite).
-7. **Jetson — install dependencies:**
-   ```bash
-   make deps-jetson
-   ```
-8. **Jetson — describe your room and anchors** (writes `config.h` for you):
-   ```bash
-   make configure          # prompts for room size, Pi (RX) position, anchor MAC+xy
-   ```
-9. **Start your anchors transmitting** so the Pi receives frames and CSI is
-   produced — e.g. ping-flood the Pi (or a broadcast) from each anchor:
-   ```bash
-   sudo ping -f -i 0.001 <pi-ip>      # run on/near each anchor
-   ```
+   From here on the Pi runs over **Ethernet** (the onboard WiFi is the sensor).
 
 ### C. Run (every session)
 10. **On the Jetson (start this first):**
@@ -245,7 +252,20 @@ steps below follow the official Pi 5 procedure (seemoo-lab/nexmon_csi discussion
 #395); **commands drift with OS/kernel versions**, so if something fails, check
 that thread for your kernel.
 
-> Do this on the Pi *while it still has normal internet* (before capture mode).
+> Do this on the Pi *while it still has normal internet* (before capture mode),
+> and do it **last** in your setup — see the caveat just below.
+
+> ⚠️ **The Nexmon firmware makes the Pi's onboard WiFi slow/flaky — by design.**
+> `install-firmware` replaces the BCM43455 firmware with a CSI/monitor-oriented
+> patched build (and `unmanage` releases `wlan0` from NetworkManager). Normal
+> WiFi on the Pi will be slower, higher-latency, and may "connect but not load
+> pages." That's expected: in this project the Pi's onboard WiFi is the **sensor**,
+> not your uplink — **run the Pi over Ethernet** for internet/`apt`/SSH. To get
+> standard WiFi back, restore stock firmware — **offline** (no internet needed):
+> `sudo make restore-firmware` then reboot. (`nexmon-part2` automatically snapshots
+> the stock firmware to `firmware_backup/` before flashing; the restore script
+> falls back to nexmon's `*.orig` backups or a cached firmware `.deb`. Online
+> fallback: `sudo apt install --reinstall firmware-brcm80211`.)
 
 **Scripted install (recommended)** — two parts, because part 1 reboots into the
 new kernel:
@@ -361,6 +381,9 @@ viz/csi_viz.c             3D OpenGL live viewer (reads the processor's JSON)
 tools/sim_collector.c     synthetic person generator for end-to-end testing
 scripts/configure.sh      generate room/RX/anchors block in config.h (make configure)
 scripts/install_*.sh      per-device dependency installers (deps-jetson/deps-pi)
+scripts/install_nexmon_*  Pi Nexmon CSI install, part 1/2 (make nexmon-part1/2)
+scripts/backup_firmware.sh / restore_firmware.sh   offline stock-WiFi restore
 scripts/run_*.sh          per-device turn-key launch (run-jetson/run-pi)
 scripts/share_net.sh      optional: share Jetson internet to the Pi over the link
+CLAUDE.md                 architecture + constraints + troubleshooting runbook
 ```
