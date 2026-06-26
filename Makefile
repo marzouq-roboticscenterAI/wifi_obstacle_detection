@@ -16,7 +16,7 @@
 #   make run-pi      -> static IP + Nexmon CSI + collector      (run ON the Pi)
 #   make share-net   -> (Jetson, optional) give the Pi internet over the link
 .PHONY: all processor viz sim cuda collector test configure deps-jetson deps-pi \
-        run-jetson run-pi share-net clean
+        nexmon-part1 nexmon-part2 run-jetson run-pi share-net clean
 
 all: processor sim
 
@@ -43,6 +43,13 @@ deps-jetson:
 
 deps-pi:
 	./scripts/install_pi.sh
+
+# Nexmon CSI firmware install on the Pi (run with sudo; part1 reboots, then part2)
+nexmon-part1:
+	./scripts/install_nexmon_part1.sh
+
+nexmon-part2:
+	./scripts/install_nexmon_part2.sh
 
 run-jetson:
 	./scripts/run_jetson.sh

@@ -45,10 +45,13 @@ WiFi channel, and we triangulate which transmitter→receiver paths are perturbe
    ```bash
    make deps-pi
    ```
-6. **Pi — install Nexmon CSI** (the one manual, hardware-specific step): switch
-   the Pi 5 to the **4 KB-page kernel** and build + install the patched firmware
-   so `nexutil` and `makecsiparams` exist. See
-   [Raspberry Pi OS / Nexmon CSI setup](#raspberry-pi-os--nexmon-csi-setup-the-real-prerequisite).
+6. **Pi — install Nexmon CSI** (the firmware that produces CSI). Two scripts,
+   because the first reboots into the 4 KB-page kernel:
+   ```bash
+   sudo make nexmon-part1     # system prep + kernel switch, then reboot
+   sudo make nexmon-part2     # after reboot: build + flash firmware, install tools
+   ```
+   Details / manual steps: [Raspberry Pi OS / Nexmon CSI setup](#raspberry-pi-os--nexmon-csi-setup-the-real-prerequisite).
 7. **Jetson — install dependencies:**
    ```bash
    make deps-jetson
@@ -235,22 +238,117 @@ One JSON object per `PROC_PERIOD_MS` tick on the processor's stdout:
 ## Raspberry Pi OS / Nexmon CSI setup (the real prerequisite)
 
 The collector is plain userspace C and runs on **standard 64-bit Raspberry Pi
-OS**. What it depends on is **Nexmon CSI firmware**, which patches the BCM43455
-firmware to emit CSI UDP frames. On the Pi 5:
+OS**. What it depends on is **Nexmon CSI firmware**, which patches the BCM43455c0
+firmware to emit CSI UDP frames. This is the one step that isn't a single
+`make` — it's a firmware build, and the Pi 5 (aarch64) needs extra setup. The
+steps below follow the official Pi 5 procedure (seemoo-lab/nexmon_csi discussion
+#395); **commands drift with OS/kernel versions**, so if something fails, check
+that thread for your kernel.
 
-1. Use 64-bit Raspberry Pi OS (Lite is fine).
-2. Switch to the **4 KB-page kernel** (Pi 5 defaults to 16 KB pages, which nexmon
-   does not support): set `kernel=kernel8.img` in `/boot/firmware/config.txt`.
-3. Build Nexmon CSI with the **`Makefile.rpi`** variant for recent kernels
-   (no patched `brcmfmac` needed). See seemoo-lab/nexmon_csi discussion #395.
-4. Configure a capture with `makecsiparams`/`mcp` + `nexutil`, then bring up
-   `wlan0`. Have your anchors send frames (e.g. ping flood) so the Pi receives
-   and emits CSI.
+> Do this on the Pi *while it still has normal internet* (before capture mode).
 
-The collector then captures those UDP frames (dst port 5500) with libpcap and
-forwards them. Format parsed: 4-byte magic `0x11111111`, 6-byte src MAC, 2-byte
-seq, 2-byte core/nss, 2-byte chanspec, 2-byte chip, then `n_sub×4` bytes of
-interleaved int16 real/imag (BCM43455c0 — no float unpacking).
+**Scripted install (recommended)** — two parts, because part 1 reboots into the
+new kernel:
+```bash
+sudo ./scripts/install_nexmon_part1.sh    # system prep + 4 KB kernel, then reboots
+# ... Pi reboots ...
+sudo ./scripts/install_nexmon_part2.sh    # clone, build, flash firmware, install tools
+```
+(equivalently `sudo make nexmon-part1` then, after reboot, `sudo make nexmon-part2`).
+Tunables: `NEXMON_DIR` (default `/opt/nexmon`), `FWVER` (default `7_45_189`).
+
+The manual equivalent of what those scripts do is below, for reference and
+troubleshooting (`make deps-pi` already covers the common packages):
+
+**1. Switch the Pi 5 to the 4 KB-page kernel** (nexmon doesn't support the
+default 16 KB-page kernel), then reboot:
+```bash
+echo 'kernel=kernel8.img' | sudo tee -a /boot/firmware/config.txt
+sudo reboot
+```
+
+**2. Build dependencies** (superset of `make deps-pi`):
+```bash
+sudo apt update
+sudo apt install -y git libgmp3-dev gawk qpdf bison flex make autoconf libtool \
+                    texinfo xxd libnl-3-dev libnl-genl-3-dev bc libssl-dev tcpdump
+```
+
+**3. (aarch64 only) add 32-bit libs the nexmon toolchain needs:**
+```bash
+sudo dpkg --add-architecture armhf
+sudo apt update
+sudo apt install -y libc6:armhf libisl23:armhf libmpfr6:armhf libmpc3:armhf libstdc++6:armhf
+sudo ln -sf /usr/lib/arm-linux-gnueabihf/libisl.so.23  /usr/lib/arm-linux-gnueabihf/libisl.so.10
+sudo ln -sf /usr/lib/arm-linux-gnueabihf/libmpfr.so.6  /usr/lib/arm-linux-gnueabihf/libmpfr.so.4
+```
+
+**4. Python 2.7** (nexmon build tools require it; pull from the Debian archive):
+```bash
+echo 'deb http://archive.debian.org/debian/ stretch contrib main non-free' | sudo tee -a /etc/apt/sources.list
+sudo apt update
+sudo apt install -y python2.7
+sudo sed -i '/archive.debian.org/d' /etc/apt/sources.list && sudo apt update
+```
+
+**5. Build the nexmon framework + nexutil:**
+```bash
+cd ~
+git clone --depth=1 https://github.com/seemoo-lab/nexmon.git
+cd nexmon
+source setup_env.sh
+sed -i '1 s|$|2.7|' "$NEXMON_ROOT/buildtools/b43-v3/debug/b43-beautifier"   # use python2.7
+make
+cd "$NEXMON_ROOT/utilities/nexutil"
+sudo -E make install USE_VENDOR_CMD=1
+sudo setcap cap_net_admin+ep /usr/bin/nexutil
+```
+
+**6. Build + install the CSI firmware (Pi variant) and `makecsiparams`:**
+```bash
+cd "$NEXMON_ROOT/patches/bcm43455c0/7_45_189"
+git clone --depth=1 https://github.com/seemoo-lab/nexmon_csi.git
+cd nexmon_csi
+make -f Makefile.rpi install-firmware     # build + flash the patched firmware
+make -f Makefile.rpi unmanage             # stop NetworkManager managing wlan0
+( cd utils/makecsiparams && make && sudo make install )   # provides makecsiparams/mcp
+```
+
+**7. Verify** the tools exist and the firmware is live:
+```bash
+which nexutil makecsiparams        # both should resolve
+nexutil -I wlan0 -g                # talks to the patched firmware (no error)
+```
+
+After this, **`make run-pi` handles the per-session configuration** for you
+(it runs `makecsiparams` + `nexutil` with your `CHANSPEC`/`MACFILTER` and starts
+the collector). The collector captures the resulting UDP frames (dst port 5500)
+with libpcap. Wire format parsed: 4-byte magic `0x11111111`, 6-byte src MAC,
+2-byte seq, 2-byte core/nss, 2-byte chanspec, 2-byte chip, then `n_sub×4` bytes
+of interleaved int16 real/imag (BCM43455c0 — no float unpacking).
+
+Sanity check before launching the tracker:
+```bash
+sudo tcpdump -i wlan0 dst port 5500    # should show packets once an anchor transmits
+```
+
+### Alternative: prebuilt firmware (nexmonster)
+
+If building from source fights with your kernel, the community **nexmonster**
+fork ships **prebuilt** CSI firmware, skipping the toolchain / Python-2.7 build:
+
+```bash
+uname -r                                            # note your exact kernel
+git clone https://github.com/nexmonster/nexmon_csi.git ~/nexmon_csi
+# checkout the branch matching your kernel (e.g. pi-5.10.92, pi-5.4.51-plus),
+# then follow that branch's README -- it installs prebuilt firmware + nexutil/mcp.
+```
+
+Honest caveat: these prebuilt builds are **pinned to specific kernel versions**
+and historically target the Pi 3B+/4/Zero 2 W. There may be **no prebuilt for the
+Pi 5 / your exact kernel**, in which case the from-source route above (discussion
+#395) is the one to use. Check `uname -r` against the available branches first;
+if there's no match, prefer `make nexmon-part1`/`part2`.
 
 ## Layout
 
