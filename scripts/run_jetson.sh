@@ -36,14 +36,9 @@ fi
 
 # static IP for the TCP (Ethernet/USB) transport
 if [ "$TRANSPORT" = tcp ]; then
-    echo "[jetson] configuring $ETH = $JETSON_IP/24 ..."
-    sudo ip link set "$ETH" up
-    sudo ip addr replace "$JETSON_IP/24" dev "$ETH"
-    if [ "$SHARE_NET" = 1 ]; then
-        echo "[jetson] sharing internet to the Pi over $ETH ..."
-        ETH="$ETH" JETSON_IP="$JETSON_IP" ./scripts/share_net.sh \
-            || echo "[jetson] share-net skipped (no uplink found); continuing"
-    fi
+    # Bring up the wired link + internet sharing (idempotent; you likely already
+    # ran `make net-jetson` before installing Nexmon on the Pi).
+    ETH="$ETH" JETSON_IP="$JETSON_IP" SHARE_NET="$SHARE_NET" ./scripts/net_jetson.sh
     PROC=(./jetson_processor/csi_processor -p "$PORT")
 else
     echo "[jetson] Bluetooth: make this adapter discoverable/pairable via bluetoothctl"

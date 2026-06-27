@@ -49,18 +49,11 @@ echo "[pi] building collector (WITH_BT=$WITH_BT) ..."
 make -C pi_collector WITH_BT="$WITH_BT"
 
 # --- static IP on the Ethernet data link -------------------------------------
-echo "[pi] configuring $ETH = $PI_IP/24 ..."
-sudo ip link set "$ETH" up
-sudo ip addr replace "$PI_IP/24" dev "$ETH"
-
-# Route the Pi's internet through the Jetson over the Ethernet link. The onboard
-# WiFi is about to become a sensor, so the Jetson is the Pi's path to the net.
-if [ "$TRANSPORT" = tcp ] && [ "$SHARE_NET" = 1 ]; then
-    echo "[pi] routing default via the Jetson ($JETSON_IP) for internet ..."
-    sudo ip route replace default via "$JETSON_IP" dev "$ETH" || true
-    grep -q "$DNS" /etc/resolv.conf 2>/dev/null \
-        || echo "nameserver $DNS" | sudo tee -a /etc/resolv.conf >/dev/null || true
-fi
+# Bring up the wired link + internet-via-Jetson (idempotent; you likely already
+# ran `make net-pi`). For Bluetooth transport, skip the Ethernet internet route.
+NP_SHARE=$([ "$TRANSPORT" = tcp ] && echo "$SHARE_NET" || echo 0)
+ETH="$ETH" PI_IP="$PI_IP" JETSON_IP="$JETSON_IP" SHARE_NET="$NP_SHARE" DNS="$DNS" \
+    ./scripts/net_pi.sh
 
 # --- free the sensing radio from NetworkManager ------------------------------
 # CSI capture puts wlan0 into a monitor-like state; if NetworkManager keeps

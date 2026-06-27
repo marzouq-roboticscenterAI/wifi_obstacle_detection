@@ -40,49 +40,58 @@ WiFi channel, and we triangulate which transmitter→receiver paths are perturbe
 
 ### B. Software setup (one-time)
 
-> **Do the Nexmon install LAST.** It patches the Pi's WiFi firmware, after which
-> the onboard WiFi is **slow/flaky by design** (see the caveat in the Nexmon
-> section). So finish everything that needs normal Pi internet first, and ideally
-> run the Pi's setup with the **Pi on Ethernet / your wired network**.
+> The Pi gets its internet **from the Jetson over Ethernet** — its onboard WiFi is
+> never needed for setup (it's about to become a sensor). Bring up that gateway
+> first, do everything else, and install **Nexmon last** (it degrades the Pi's
+> WiFi by design — see the Nexmon caveat).
 
 4. **Get the repo on both boards** (clone or copy this folder to each).
-5. **Jetson — install dependencies:**
+5. **Jetson — install dependencies** (uses the Jetson's own WiFi internet):
    ```bash
    make deps-jetson
    ```
 6. **Jetson — describe your room and anchors** (writes `config.h` for you):
    ```bash
-   make configure          # prompts for room size, Pi (RX) position, anchor MAC+xy
+   make configure          # room size, Pi (RX) position, anchor MAC+xy
    ```
-7. **Pi — install dependencies** (while the Pi still has good internet):
+7. **Jetson — bring up the gateway** (shares its internet to the Pi over Ethernet):
+   ```bash
+   make net-jetson
+   ```
+8. **Pi — get online through the Jetson** over Ethernet (no WiFi needed):
+   ```bash
+   make net-pi             # then verify: ping -c2 1.1.1.1
+   ```
+9. **Pi — install dependencies** (now online via the Jetson):
    ```bash
    make deps-pi
    ```
-8. **Start your anchors transmitting** so the Pi receives frames and CSI is
-   produced — e.g. ping-flood the Pi (or a broadcast) from each anchor:
-   ```bash
-   sudo ping -f -i 0.001 <pi-ip>      # run on/near each anchor
-   ```
-9. **Pi — install Nexmon CSI (the LAST step).** It produces the CSI but degrades
-   the onboard WiFi, so do it once everything above is done. Two scripts, because
-   the first reboots into the 4 KB-page kernel:
-   ```bash
-   sudo make nexmon-part1     # system prep + kernel switch, then reboot
-   sudo make nexmon-part2     # after reboot: build + flash firmware, install tools
-   ```
-   Details / manual steps: [Raspberry Pi OS / Nexmon CSI setup](#raspberry-pi-os--nexmon-csi-setup-the-real-prerequisite).
-   From here on the Pi runs over **Ethernet** (the onboard WiFi is the sensor).
+10. **Start your anchors transmitting** so the Pi receives frames and CSI is
+    produced — e.g. ping-flood the Pi from each anchor:
+    ```bash
+    sudo ping -f -i 0.001 <pi-ip>
+    ```
+11. **Pi — install Nexmon CSI (the LAST step).** It produces CSI but degrades the
+    onboard WiFi, so do it once everything above is done:
+    ```bash
+    sudo make nexmon-part1     # system prep + 4 KB kernel switch, then reboots
+    sudo make nexmon-part2     # auto-restores internet via the Jetson, then builds + flashes
+    ```
+    (`nexmon-part2` runs `net-pi` for you to restore Ethernet internet after the
+    reboot; pass `NET_PI=0` if the Pi uses a non-Jetson uplink for the install.)
+    Details / manual steps: [Raspberry Pi OS / Nexmon CSI setup](#raspberry-pi-os--nexmon-csi-setup-the-real-prerequisite).
+    From here on the Pi runs over **Ethernet** (the onboard WiFi is the sensor).
 
 ### C. Run (every session)
-10. **On the Jetson (start this first):**
+12. **On the Jetson (start this first):**
     ```bash
-    make run-jetson         # static IP + internet-share to Pi + processor + 3D view
+    make run-jetson         # gateway + processor + 3D view (re-applies net-jetson)
     ```
-11. **On the Pi:**
+13. **On the Pi:**
     ```bash
-    make run-pi             # static IP + route via Jetson + Nexmon CSI + collector
+    make run-pi             # net + Nexmon CSI config + collector (re-applies net-pi)
     ```
-12. **Watch** the OpenGL window on the Jetson track the person. **Ctrl-C** both to
+14. **Watch** the OpenGL window on the Jetson track the person. **Ctrl-C** both to
     stop (the Pi's onboard WiFi is handed back to NetworkManager automatically).
 
 Notes: `run-jetson` opens the viewer when a display is present (`VIZ=0` forces
@@ -92,20 +101,22 @@ documented in each script header — `JETSON_IP`, `CHANSPEC` (e.g. `36/80`),
 
 ## Networking & internet
 
-- **By default the Pi gets its internet through the Jetson.** `run-jetson` shares
-  the Jetson's uplink (its WiFi/another NIC) to the Pi over the Ethernet link via
-  NAT, and `run-pi` routes the Pi's default through the Jetson (`192.168.100.1`).
-  So at runtime the Pi is online *via the Jetson*, even though its onboard WiFi is
-  busy sensing. Turn it off with `SHARE_NET=0` on either script.
-- The Jetson needs its **own** internet (its WiFi or another NIC) for this to do
-  anything. If it has none, sharing is skipped harmlessly and the Pi just runs
-  offline — which is fine (timing is clock-independent).
+- **The Pi gets its internet through the Jetson over Ethernet.** Bring the gateway
+  up explicitly and early with **`make net-jetson`** (Jetson: static IP + NAT
+  sharing its WiFi uplink) and **`make net-pi`** (Pi: static IP + default route +
+  DNS via the Jetson). `run-jetson`/`run-pi` re-apply these, so you can also rely
+  on them at run time. So the Pi never needs its own WiFi for internet — including
+  during `deps-pi` and the Nexmon install. Turn sharing off with `SHARE_NET=0`.
+- The Jetson needs its **own** internet (its WiFi or another NIC) for this to work.
+  If it has none, sharing is skipped harmlessly and the Pi just runs offline —
+  which is fine for tracking (timing is clock-independent), but `deps-pi`/Nexmon
+  would then need another internet source.
 - The Pi's **onboard WiFi is the sensor**, not an uplink, once CSI capture is on;
   it drops off your network when `run-pi` starts and is restored on exit.
-- **First-time setup** (apt installs) still needs Pi internet *before* capture:
-  use the Pi's normal WiFi (it's a plain station until `run-pi`), a temporary
-  Ethernet-to-router, or bring up the Jetson + `run-jetson` share first, then
-  `make deps-pi`.
+- `ip`-based addressing isn't persistent across reboots, but you don't have to
+  think about it: **`nexmon-part2` automatically runs `net-pi`** to restore the
+  Pi's internet via the Jetson after the part-1 reboot (skip with `NET_PI=0` if
+  the Pi has its own uplink). `run-pi` re-applies it too.
 
 ## Honest capabilities & limits
 
@@ -383,7 +394,8 @@ scripts/configure.sh      generate room/RX/anchors block in config.h (make confi
 scripts/install_*.sh      per-device dependency installers (deps-jetson/deps-pi)
 scripts/install_nexmon_*  Pi Nexmon CSI install, part 1/2 (make nexmon-part1/2)
 scripts/backup_firmware.sh / restore_firmware.sh   offline stock-WiFi restore
+scripts/net_jetson.sh / net_pi.sh   bring up Ethernet + Jetson->Pi internet (net-jetson/net-pi)
 scripts/run_*.sh          per-device turn-key launch (run-jetson/run-pi)
-scripts/share_net.sh      optional: share Jetson internet to the Pi over the link
+scripts/share_net.sh      NAT helper used by net-jetson (share Jetson internet to the Pi)
 CLAUDE.md                 architecture + constraints + troubleshooting runbook
 ```

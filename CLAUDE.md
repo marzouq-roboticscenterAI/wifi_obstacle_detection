@@ -21,8 +21,13 @@ not a literal reproduction. Full docs: **README.md**.
 Setup: `make deps-jetson` / `make deps-pi` · `make configure` (room+anchors) ·
 `sudo make nexmon-part1` → reboot → `sudo make nexmon-part2` (Pi firmware) ·
 `make backup-firmware` / `make restore-firmware` (offline stock-WiFi restore)
-Run: `make run-jetson` (first) · `make run-pi` · `make share-net` (Pi internet via Jetson)
-Bluetooth transport: `TRANSPORT=bt` (builds with `WITH_BT=1`).
+Network (Pi gets internet via Jetson over Ethernet, BEFORE Nexmon):
+`make net-jetson` (Jetson gateway + NAT) → `make net-pi` (Pi online via Jetson).
+Run: `make run-jetson` (first) · `make run-pi` (both re-apply the net steps) ·
+`make share-net` (raw NAT helper). Bluetooth transport: `TRANSPORT=bt` (`WITH_BT=1`).
+`ip` config isn't persistent, but `nexmon-part2` auto-runs `net-pi` after the
+part-1 reboot (and `run-pi` re-applies it), so internet-via-Jetson is restored
+automatically (`NET_PI=0` to skip).
 
 ## Hard constraints — do NOT relitigate these
 - **Pi 5 BCM43455 is 1×1** (one antenna): no angle-of-arrival. Localization needs
@@ -46,8 +51,11 @@ Bluetooth transport: `TRANSPORT=bt` (builds with `WITH_BT=1`).
 
 ## Setup ORDER matters
 Do **Nexmon last** — it patches the Pi's WiFi firmware and degrades the onboard
-WiFi. Order: Jetson `deps`+`configure` → Pi `deps` → start anchors → Pi Nexmon.
-Run the Pi's setup on **Ethernet** so the firmware patch can't strand it.
+WiFi. Order: Jetson `deps`+`configure`+`net-jetson` → Pi `net-pi` (online via
+Jetson over Ethernet) → Pi `deps` → start anchors → Pi `nexmon-part1` → reboot →
+`nexmon-part2` (auto-runs `net-pi` to restore internet; `NET_PI=0` to skip). The
+Pi's internet comes from the Jetson over Ethernet throughout, so its onboard
+WiFi is never needed for setup.
 
 ## Troubleshooting runbook (issues we've actually hit)
 - **"Pi connects to internet but browsers won't load / WiFi is slow."** Two causes,

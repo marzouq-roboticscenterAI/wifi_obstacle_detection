@@ -28,6 +28,17 @@ if [ "$PS" != 4096 ] && [ "$FORCE" != 1 ]; then
     exit 1
 fi
 
+# --- restore internet via the Jetson (the part-1 reboot wiped the ip config) --
+# The clones below need internet; pull it over Ethernet from the Jetson so the
+# Pi's onboard WiFi isn't involved. Skip with NET_PI=0 if the Pi already has its
+# own uplink (e.g. a router on another interface).
+if [ "${NET_PI:-1}" = 1 ]; then
+    echo "[nexmon-2] bringing the Pi online via the Jetson (net-pi) ..."
+    "$SELF_DIR/net_pi.sh" || echo "[nexmon-2] WARN: net-pi failed; ensure the Pi has internet before continuing"
+    ping -c1 -W3 "${JETSON_IP:-192.168.100.1}" >/dev/null 2>&1 \
+        || echo "[nexmon-2] WARN: can't reach the Jetson gateway -- did 'make net-jetson' run on the Jetson? clones may fail."
+fi
+
 echo "[nexmon-2] cloning nexmon framework into $NEXMON_DIR ..."
 mkdir -p "$(dirname "$NEXMON_DIR")"
 [ -d "$NEXMON_DIR/.git" ] || git clone --depth=1 https://github.com/seemoo-lab/nexmon.git "$NEXMON_DIR"

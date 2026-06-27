@@ -17,7 +17,7 @@
 #   make share-net   -> (Jetson, optional) give the Pi internet over the link
 .PHONY: all processor viz sim cuda collector test configure deps-jetson deps-pi \
         nexmon-part1 nexmon-part2 backup-firmware restore-firmware \
-        run-jetson run-pi share-net clean
+        net-jetson net-pi run-jetson run-pi share-net clean
 
 all: processor sim
 
@@ -58,6 +58,12 @@ backup-firmware:
 
 restore-firmware:
 	./scripts/restore_firmware.sh
+
+net-jetson:
+	./scripts/net_jetson.sh
+
+net-pi:
+	./scripts/net_pi.sh
 
 run-jetson:
 	./scripts/run_jetson.sh
