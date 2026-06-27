@@ -15,6 +15,12 @@ set -eo pipefail
 
 [ "$(id -u)" -eq 0 ] || { echo "run me with sudo (need root)."; exit 1; }
 
+# Mirror all output to a log and report exactly which command/line fails, so
+# "Error 2" becomes actionable.
+LOG="${LOG:-/tmp/nexmon-part2.log}"
+exec > >(tee "$LOG") 2>&1
+trap 'rc=$?; echo; echo "[nexmon-2] >>> FAILED (exit $rc) at line $LINENO: $BASH_COMMAND"; echo "[nexmon-2] >>> full log: $LOG  (paste the last ~25 lines for help)"; exit $rc' ERR
+
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 NEXMON_DIR=${NEXMON_DIR:-/opt/nexmon}
 FWVER=${FWVER:-7_45_189}
